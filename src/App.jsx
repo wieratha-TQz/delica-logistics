@@ -66,7 +66,7 @@ const STATUS_OPTIONS = [
 
 const MONTHS_LIST = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
 
-// DATABASE HARI LIBUR NASIONAL (Contoh 2024-2025)
+// DATABASE HARI LIBUR NASIONAL
 const HOLIDAYS_DATA = {
   '2024-01-01': 'Tahun Baru Masehi',
   '2024-02-08': 'Isra Mikraj',
@@ -85,7 +85,6 @@ const HOLIDAYS_DATA = {
   '2024-08-17': 'Hari Kemerdekaan RI',
   '2024-09-16': 'Maulid Nabi Muhammad SAW',
   '2024-12-25': 'Hari Raya Natal',
-  // 2025 Estimasi
   '2025-01-01': 'Tahun Baru Masehi',
   '2025-01-29': 'Tahun Baru Imlek',
   '2025-03-29': 'Hari Suci Nyepi',
@@ -151,7 +150,6 @@ const LoginScreen = ({ onLogin, isLoading, error }) => {
 
   return (
     <div className="min-h-screen bg-[#f8fafc] flex flex-col items-center justify-center p-6 relative overflow-hidden">
-      {/* Background Decor */}
       <div className="absolute top-0 left-0 w-full h-full overflow-hidden z-0">
         <div className="absolute -top-20 -left-20 w-96 h-96 bg-sky-200 rounded-full blur-[100px] opacity-30"></div>
         <div className="absolute bottom-0 right-0 w-96 h-96 bg-indigo-200 rounded-full blur-[100px] opacity-30"></div>
@@ -198,7 +196,7 @@ const LoginScreen = ({ onLogin, isLoading, error }) => {
                 type="password" 
                 required 
                 className="w-full pl-12 pr-4 py-4 rounded-2xl bg-slate-50 border-2 border-transparent focus:border-sky-400 outline-none font-bold text-slate-600 transition-all shadow-inner"
-                placeholder="password"
+                placeholder="delica."
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
@@ -847,14 +845,127 @@ export default function App() {
   const downloadJPG = async () => {
     const node = document.getElementById('report-content');
     if (!node || !window.htmlToImage) return;
+    
     setIsDownloading(true);
+    
     try {
-      const dataUrl = await window.htmlToImage.toJpeg(node, { 
-        quality: 0.95, backgroundColor: '#ffffff',
+      const scrollContainer = node.querySelector('.overflow-x-auto');
+      let width = node.offsetWidth;
+      let height = node.offsetHeight;
+
+      if (scrollContainer) {
+        width = Math.max(width, scrollContainer.scrollWidth);
+      }
+
+      // Clone untuk JPG
+      const clone = node.cloneNode(true);
+      clone.style.width = `${width}px`;
+      clone.style.height = `${height}px`;
+      clone.style.position = 'absolute';
+      clone.style.top = '0';
+      clone.style.left = '0'; // Posisi di 0,0
+      clone.style.zIndex = '-9999'; // Tapi di paling belakang
+      clone.style.backgroundColor = '#ffffff'; // Pastikan background putih
+      clone.style.overflow = 'visible';
+
+      const cloneScroll = clone.querySelector('.overflow-x-auto');
+      if (cloneScroll) {
+        cloneScroll.style.overflow = 'visible';
+        cloneScroll.style.width = '100%';
+        cloneScroll.classList.remove('overflow-x-auto');
+      }
+
+      document.body.appendChild(clone);
+      await new Promise(resolve => setTimeout(resolve, 800));
+
+      const dataUrl = await window.htmlToImage.toJpeg(clone, { 
+        quality: 0.95, 
+        backgroundColor: '#ffffff',
+        width: width,
+        height: height,
         filter: (el) => !el.classList?.contains('no-capture')
       });
+      
+      document.body.removeChild(clone);
+
       const link = document.createElement('a'); link.download = `delica-timeline.jpg`; link.href = dataUrl; link.click();
-    } catch (error) { console.error(error); } finally { setIsDownloading(false); }
+    } catch (error) { 
+        console.error("Gagal download JPG:", error); 
+    } finally { setIsDownloading(false); }
+  };
+
+  // REVISED downloadTimelinePDF (FULL TIMELINE FIX)
+  const downloadTimelinePDF = async () => {
+    const originalNode = document.getElementById('report-content');
+    const jsPDF = window.jspdf?.jsPDF || window.jsPDF;
+    
+    if (!originalNode || !window.htmlToImage || !jsPDF) {
+        alert("Library belum siap. Mohon refresh.");
+        return;
+    }
+    
+    setIsDownloading(true);
+    
+    try {
+      // 1. Analisis Ukuran Asli (Scroll Width)
+      const scrollContainer = originalNode.querySelector('.overflow-x-auto');
+      let fullWidth = scrollContainer ? scrollContainer.scrollWidth : originalNode.offsetWidth;
+      let fullHeight = originalNode.offsetHeight + 20;
+
+      // 2. Clone Node
+      const clone = originalNode.cloneNode(true);
+      
+      // 3. Konfigurasi Style Clone - Tempel di background 0,0 dengan z-index rendah
+      // Teknik ini memastikan elemen dirender oleh browser (tidak di-skip optimasi)
+      clone.style.position = 'absolute';
+      clone.style.top = '0';
+      clone.style.left = '0';
+      clone.style.width = `${fullWidth}px`;
+      clone.style.height = `${fullHeight}px`;
+      clone.style.zIndex = '-9999'; // Di belakang layar
+      clone.style.backgroundColor = '#ffffff';
+      clone.style.overflow = 'visible'; // Paksa overflow visible
+
+      // Fix internal scroll container di dalam clone agar melebar
+      const cloneScroll = clone.querySelector('.overflow-x-auto');
+      if (cloneScroll) {
+        cloneScroll.style.overflow = 'visible';
+        cloneScroll.style.width = '100%'; 
+        cloneScroll.classList.remove('overflow-x-auto');
+      }
+      
+      // Append ke body
+      document.body.appendChild(clone);
+      
+      // Waktu tunggu render agar style applied
+      await new Promise(resolve => setTimeout(resolve, 800));
+
+      // 4. Capture ke PNG
+      const dataUrl = await window.htmlToImage.toPng(clone, { 
+        backgroundColor: '#ffffff',
+        width: fullWidth,
+        height: fullHeight,
+        style: { transform: 'scale(1)' }, 
+        filter: (el) => !el.classList?.contains('no-capture')
+      });
+
+      // Hapus clone setelah capture selesai
+      document.body.removeChild(clone);
+
+      // 5. Generate PDF dengan Ukuran Halaman Dinamis (Custom Page Size)
+      const pdf = new jsPDF({
+        orientation: 'landscape',
+        unit: 'px', // Gunakan pixel agar akurat dengan gambar
+        format: [fullWidth + 40, fullHeight + 40] // Custom format sebesar gambar + margin
+      });
+
+      pdf.addImage(dataUrl, 'PNG', 20, 20, fullWidth, fullHeight);
+      pdf.save(`Timeline_Lengkap_Full.pdf`);
+
+    } catch (error) { 
+        console.error("Gagal download PDF Timeline:", error); 
+        alert("Gagal export PDF. Silakan coba lagi.");
+    } finally { setIsDownloading(false); }
   };
 
   const downloadExcel = () => {
@@ -921,11 +1032,55 @@ export default function App() {
     } else { alert("Plugin Tabel PDF belum dimuat sempurna. Tunggu sebentar atau refresh."); }
   };
 
-  // --- HELPER UNTUK RENDER KONTEN (MENGHINDARI BUG TAMPILAN GANDA) ---
-  const renderContent = () => {
-    switch(activeTab) {
-      case 'calendar':
-        return (
+  // --- RENDER UTAMA ---
+  if (authLoading) return <div className="flex h-screen items-center justify-center bg-sky-50"><BrandLogo /></div>;
+
+  if (!user) {
+    return <LoginScreen onLogin={handleLogin} isLoading={authLoading} error={loginError} />;
+  }
+
+  return (
+    <div className="min-h-screen bg-[#f8fafc] font-sans pb-20 text-slate-600">
+      <nav className="bg-white/80 backdrop-blur-md border-b border-sky-100 sticky top-0 z-[1000] shadow-sm no-capture">
+        <div className="max-w-[1600px] mx-auto px-6 h-20 flex items-center justify-between">
+          <BrandLogo />
+          <div className="flex items-center gap-4">
+            <div className="hidden lg:flex gap-2 bg-sky-50/50 p-1.5 rounded-[1.25rem]">
+              {[
+                { id: 'dashboard', label: 'Beranda', icon: <Activity size={18}/> }, 
+                { id: 'calendar', label: 'Timeline', icon: <CalendarIcon size={18}/> }, 
+                { id: 'assets', label: 'Manajemen', icon: <HardDrive size={18}/> }, 
+                { id: 'reports', label: 'Laporan', icon: <BarChart3 size={18}/> }
+              ].map(tab => (
+                <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${activeTab === tab.id ? 'bg-sky-500 text-white shadow-md' : 'text-slate-400 hover:text-sky-600 hover:bg-sky-50'}`}>
+                  {tab.icon} {tab.label}
+                </button>
+              ))}
+            </div>
+            
+            <button onClick={handleLogout} className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-100 text-slate-500 hover:bg-rose-50 hover:text-rose-500 font-bold text-xs transition-all">
+                <LogOut size={16} /> <span className="hidden sm:inline">Logout</span>
+            </button>
+          </div>
+        </div>
+      </nav>
+
+      {/* MOBILE MENU */}
+      <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-100 p-4 flex justify-around z-[1000] no-capture">
+         {[
+            { id: 'dashboard', icon: <Activity size={20}/> }, 
+            { id: 'calendar', icon: <CalendarIcon size={20}/> }, 
+            { id: 'assets', icon: <HardDrive size={20}/> }, 
+            { id: 'reports', icon: <BarChart3 size={20}/> }
+          ].map(tab => (
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`p-3 rounded-2xl transition-all ${activeTab === tab.id ? 'bg-sky-50 text-sky-500' : 'text-slate-400'}`}>
+              {tab.icon}
+            </button>
+          ))}
+      </div>
+
+      <div className="p-6 md:p-10 relative z-10 text-left">
+        {activeTab === 'calendar' && (
           <div className="max-w-[1600px] mx-auto space-y-12 animate-in">
             {/* TOP ACTIONS */}
             <div className="bg-white p-8 rounded-[2.5rem] shadow-xl border border-white flex flex-col gap-8 no-capture">
@@ -936,7 +1091,10 @@ export default function App() {
                   <select className="bg-white text-xs font-bold pl-4 pr-10 py-2 rounded-xl border border-slate-100 outline-none focus:ring-2 focus:ring-sky-100" value={filterDriverCopy} onChange={(e) => setFilterDriverCopy(e.target.value)}><option value="Semua">Pilih Driver</option>{drivers.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}</select>
                   <button onClick={copyLogisticsText} className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-xs transition-all ${copyFeedback ? 'bg-emerald-500 text-white shadow-lg' : 'bg-slate-700 text-white hover:bg-slate-800 shadow-md'}`}>{copyFeedback ? <CheckCircle2 size={14}/> : <ClipboardList size={14}/>} {copyFeedback ? 'Tersalin!' : 'Salin WhatsApp'}</button>
                 </div>
-                <button onClick={downloadJPG} disabled={isDownloading} className="flex items-center gap-2 bg-white border border-sky-100 text-sky-500 px-7 py-3 rounded-2xl font-bold hover:bg-sky-50 shadow-sm">{isDownloading ? <span className="animate-spin">◌</span> : <Download size={18}/>} JPG Timeline</button>
+                <div className="flex gap-2">
+                   <button onClick={downloadJPG} disabled={isDownloading} className="flex items-center gap-2 bg-white border border-sky-100 text-sky-500 px-5 py-3 rounded-2xl font-bold hover:bg-sky-50 shadow-sm text-xs">{isDownloading ? <span className="animate-spin">◌</span> : <Download size={16}/>} JPG</button>
+                   <button onClick={downloadTimelinePDF} disabled={isDownloading} className="flex items-center gap-2 bg-slate-700 border border-slate-700 text-white px-5 py-3 rounded-2xl font-bold hover:bg-slate-800 shadow-sm text-xs">{isDownloading ? <span className="animate-spin">◌</span> : <FileText size={16}/>} PDF Full</button>
+                </div>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4 bg-slate-50/50 p-6 rounded-[2rem] border border-slate-100 shadow-inner no-capture">
                   {['Status', 'Tutup Cup', 'Driver'].map((type, i) => (
@@ -955,7 +1113,7 @@ export default function App() {
             <div id="report-content" className="space-y-12">
               <div className="bg-white rounded-[2.5rem] shadow-xl border border-white overflow-hidden relative z-[5]">
                 <div className="overflow-x-auto custom-scrollbar">
-                  <table className="w-full border-collapse table-fixed min-w-[1200px]">
+                  <table id="timeline-table-container" className="w-full border-collapse table-fixed min-w-[1200px]">
                     <thead>
                       <tr className="bg-sky-50/20 text-sky-400 font-bold text-[10px] uppercase tracking-widest">
                         <th className="sticky left-0 z-50 bg-white/95 backdrop-blur-sm border-r border-b border-sky-50 p-3 text-left w-40">Unit Freezer</th>
@@ -990,10 +1148,8 @@ export default function App() {
                             const target = allocation.find(a => a.unitId === unit.id && loopDate >= a.start && loopDate <= a.end);
                             
                             let bBg = 'transparent'; let op = 1;
-                            
-                            // Background untuk hari libur/weekend (lebih terang)
                             if ((isWeekend || isHoliday) && !target) {
-                                bBg = 'rgba(255, 228, 230, 0.3)'; // rose-50 with opacity
+                                bBg = 'rgba(255, 228, 230, 0.3)';
                             }
 
                             if (target) {
@@ -1027,7 +1183,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* LIST VIEW */}
               <div className="bg-white rounded-[2.5rem] shadow-xl border border-white overflow-hidden text-left">
                   <div className="p-8 border-b border-slate-50 bg-slate-50/30 flex justify-between items-center"><h3 className="text-xl font-black text-slate-800 uppercase italic">Database Booking Aktif</h3></div>
                   <div className="overflow-x-auto"><table className="w-full border-collapse">
@@ -1090,12 +1245,10 @@ export default function App() {
               </div>
             </div>
           </div>
-        );
-      
-      case 'reports':
-        return (
+        )}
+
+        {activeTab === 'reports' && (
           <div className="max-w-[1400px] mx-auto space-y-12 animate-in text-left">
-            {/* HEADER LAPORAN + CEK STOK BUTTON */}
             <div className="bg-white p-8 rounded-[2.5rem] shadow-xl border border-white flex flex-col md:flex-row items-center justify-between gap-6 no-capture">
               <div>
                 <h2 className="text-2xl font-black text-slate-800 uppercase italic tracking-tighter leading-none mb-1 text-left">Analisa Logistik</h2>
@@ -1119,14 +1272,12 @@ export default function App() {
                  <h3 className="text-lg font-bold text-slate-700 mb-8 italic">Performa Driver</h3>
                  <div className="w-full h-80 relative flex items-center justify-center"><canvas id="driverPerformanceChart"></canvas></div>
               </div>
-              {/* GRAFIK LAPORAN TAHUNAN BARU */}
               <div className="bg-white p-10 rounded-[3rem] shadow-2xl border border-white flex flex-col items-center lg:col-span-2">
                  <h3 className="text-lg font-bold text-slate-700 mb-8 italic">Tren Order Tahunan {reportYear}</h3>
                  <div className="w-full h-80 relative flex items-center justify-center"><canvas id="annualReportChart"></canvas></div>
               </div>
             </div>
 
-            {/* TOMBOL DOWNLOAD DETAIL */}
             <div className="bg-white p-10 rounded-[3rem] shadow-2xl border border-white text-center space-y-8 no-capture">
                <div className="max-w-md mx-auto space-y-4 text-center">
                  <div className="w-20 h-20 bg-sky-50 rounded-3xl flex items-center justify-center mx-auto text-sky-400 shadow-inner text-center"><Download size={40}/></div>
@@ -1139,10 +1290,9 @@ export default function App() {
                </div>
             </div>
           </div>
-        );
+        )}
 
-      case 'assets':
-        return (
+        {activeTab === 'assets' && (
           <div className="max-w-6xl mx-auto space-y-12 animate-in text-left">
             <div className="bg-white rounded-[2.5rem] shadow-xl border border-white overflow-hidden">
               <div className="p-10 border-b border-sky-50 flex items-center justify-between bg-sky-50/20">
@@ -1166,11 +1316,9 @@ export default function App() {
               </table></div>
             </div>
           </div>
-        );
+        )}
 
-      case 'dashboard':
-      default:
-        return (
+        {activeTab === 'dashboard' && (
           <div className="max-w-6xl mx-auto space-y-12 animate-in text-left">
              <div className="bg-white p-12 rounded-[3.5rem] shadow-2xl border border-white relative overflow-hidden group">
                 <div className="relative z-10 space-y-6">
@@ -1195,67 +1343,7 @@ export default function App() {
                 </div>
              </div>
           </div>
-        );
-    }
-  };
-
-  // --- RENDER UTAMA ---
-  if (authLoading) return <div className="flex h-screen items-center justify-center bg-sky-50"><BrandLogo /></div>;
-
-  // JIKA USER BELUM LOGIN, TAMPILKAN LOGIN SCREEN
-  if (!user) {
-    return <LoginScreen onLogin={handleLogin} isLoading={authLoading} error={loginError} />;
-  }
-
-  // JIKA SUDAH LOGIN, TAMPILKAN DASHBOARD
-  return (
-    <div className="min-h-screen bg-[#f8fafc] font-sans pb-20 text-slate-600">
-      <nav className="bg-white/80 backdrop-blur-md border-b border-sky-100 sticky top-0 z-[1000] shadow-sm no-capture">
-        <div className="max-w-[1600px] mx-auto px-6 h-20 flex items-center justify-between">
-          <BrandLogo />
-          <div className="flex items-center gap-4">
-            <div className="hidden lg:flex gap-2 bg-sky-50/50 p-1.5 rounded-[1.25rem]">
-              {[
-                { id: 'dashboard', label: 'Beranda', icon: <Activity size={18}/> }, 
-                { id: 'calendar', label: 'Timeline', icon: <CalendarIcon size={18}/> }, 
-                { id: 'assets', label: 'Manajemen', icon: <HardDrive size={18}/> }, 
-                { id: 'reports', label: 'Laporan', icon: <BarChart3 size={18}/> }
-              ].map(tab => (
-                <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${activeTab === tab.id ? 'bg-sky-500 text-white shadow-md' : 'text-slate-400 hover:text-sky-600 hover:bg-sky-50'}`}>
-                  {tab.icon} {tab.label}
-                </button>
-              ))}
-            </div>
-            
-            {/* LOGOUT BUTTON */}
-            <button 
-                onClick={handleLogout}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-100 text-slate-500 hover:bg-rose-50 hover:text-rose-500 font-bold text-xs transition-all"
-                title="Keluar"
-            >
-                <LogOut size={16} /> 
-                <span className="hidden sm:inline">Logout</span>
-            </button>
-          </div>
-        </div>
-      </nav>
-
-      {/* MOBILE MENU (Simple) */}
-      <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-100 p-4 flex justify-around z-[1000] no-capture">
-         {[
-            { id: 'dashboard', icon: <Activity size={20}/> }, 
-            { id: 'calendar', icon: <CalendarIcon size={20}/> }, 
-            { id: 'assets', icon: <HardDrive size={20}/> }, 
-            { id: 'reports', icon: <BarChart3 size={20}/> }
-          ].map(tab => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`p-3 rounded-2xl transition-all ${activeTab === tab.id ? 'bg-sky-50 text-sky-500' : 'text-slate-400'}`}>
-              {tab.icon}
-            </button>
-          ))}
-      </div>
-
-      <div className="p-6 md:p-10 relative z-10 text-left">
-        {renderContent()}
+        )}
       </div>
 
       {/* --- MODALS --- */}
