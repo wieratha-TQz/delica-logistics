@@ -183,7 +183,7 @@ const LoginScreen = ({ onLogin, isLoading, error }) => {
                 type="text" 
                 required 
                 className="w-full pl-12 pr-4 py-4 rounded-2xl bg-slate-50 border-2 border-transparent focus:border-sky-400 outline-none font-bold text-slate-600 transition-all shadow-inner"
-                placeholder="admin"
+                placeholder="user"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
               />
@@ -198,7 +198,7 @@ const LoginScreen = ({ onLogin, isLoading, error }) => {
                 type="password" 
                 required 
                 className="w-full pl-12 pr-4 py-4 rounded-2xl bg-slate-50 border-2 border-transparent focus:border-sky-400 outline-none font-bold text-slate-600 transition-all shadow-inner"
-                placeholder="delica."
+                placeholder="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
