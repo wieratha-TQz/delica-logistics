@@ -181,7 +181,7 @@ const LoginScreen = ({ onLogin, isLoading, error }) => {
                 type="text" 
                 required 
                 className="w-full pl-12 pr-4 py-4 rounded-2xl bg-slate-50 border-2 border-transparent focus:border-sky-400 outline-none font-bold text-slate-600 transition-all shadow-inner"
-                placeholder="user"
+                placeholder="admin"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
               />
@@ -238,6 +238,7 @@ export default function App() {
   const [tlFilterStatus, setTlFilterStatus] = useState('Semua');
   const [tlFilterCup, setTlFilterCup] = useState('Semua');
   const [tlFilterDriver, setTlFilterDriver] = useState('Semua');
+  const [tlFilterSize, setTlFilterSize] = useState('Semua'); // New state for cup size filter
 
   const [isOrderModalOpen, setIsOrderModalOpen] = useState(false);
   const [isAssetModalOpen, setIsAssetModalOpen] = useState(false);
@@ -275,7 +276,7 @@ export default function App() {
 
   const [orderForm, setOrderForm] = useState({
     customerName: '', phone: '', deliveryDate: '', eventDate: '', returnDate: '', unitCount: 1, 
-    freezerType: '', address: '', mapsLink: '', productQuantity: '', cupDesign: 'Regular', 
+    freezerType: '', address: '', mapsLink: '', productQuantity: '', cupDesign: 'Regular', cupSize: '', // Added cupSize
     status: 'Ready', deliveryDriver: '', pickupDriver: '' 
   });
 
@@ -332,12 +333,10 @@ export default function App() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (u) => { 
       if (u) {
-        // Cek apakah sesi valid (disimpan saat login manual)
         const isAdminSession = sessionStorage.getItem('delica_admin_session');
         if (isAdminSession) {
             setUser(u);
         } else {
-            // Jika user ada di Firebase tapi tidak punya sesi di browser ini (misal sisa Anonymous Auth lama), logout
             signOut(auth);
             setUser(null);
         }
@@ -355,10 +354,8 @@ export default function App() {
     setAuthLoading(true);
     setLoginError('');
     
-    // HARDCODED CREDENTIAL CHECK
     if (username === 'admin' && password === 'delica.') {
       try {
-        // Set flag sesi di sessionStorage agar persist saat refresh tapi hilang saat tab ditutup/logout
         sessionStorage.setItem('delica_admin_session', 'true');
         await signInAnonymously(auth);
       } catch (err) {
@@ -378,15 +375,15 @@ export default function App() {
   const handleLogout = async () => {
     try {
       await signOut(auth);
-      sessionStorage.removeItem('delica_admin_session'); // Hapus sesi
-      setActiveTab('dashboard'); // Reset tab
+      sessionStorage.removeItem('delica_admin_session'); 
+      setActiveTab('dashboard'); 
       setOrders([]); 
     } catch (err) {
       console.error(err);
     }
   };
 
-  // --- DATA FETCHING (Only if User) ---
+  // --- DATA FETCHING ---
   useEffect(() => {
     if (!user) return;
     const unsubOrders = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'orders'), (s) => setOrders(s.docs.map(d => ({ id: d.id, ...d.data() }))));
@@ -394,6 +391,10 @@ export default function App() {
     const unsubDrivers = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'drivers'), (s) => setDrivers(s.docs.map(d => ({ id: d.id, ...d.data() }))));
     return () => { unsubOrders(); unsubAssets(); unsubDrivers(); };
   }, [user]);
+
+  // --- DATE NAVIGATION ---
+  const nextMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
+  const prevMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1));
 
   // Data Logic
   const expandedFreezers = useMemo(() => {
@@ -425,18 +426,25 @@ export default function App() {
       const matchStatus = tlFilterStatus === 'Semua' || o.status === tlFilterStatus;
       const matchCup = tlFilterCup === 'Semua' || o.cupDesign === tlFilterCup;
       const matchDriver = tlFilterDriver === 'Semua' || o.deliveryDriver === tlFilterDriver || o.pickupDriver === tlFilterDriver;
-      return matchStatus && matchCup && matchDriver;
+      const matchSize = tlFilterSize === 'Semua' || o.cupSize === tlFilterSize; // Filter logic for size
+      return matchStatus && matchCup && matchDriver && matchSize;
     });
     
     filtered.forEach((o, index) => {
       map[o.id] = index + 1;
     });
     return map;
-  }, [sortedOrders, tlFilterStatus, tlFilterCup, tlFilterDriver]);
+  }, [sortedOrders, tlFilterStatus, tlFilterCup, tlFilterDriver, tlFilterSize]);
 
   const filteredOrders = useMemo(() => {
     return sortedOrders.filter(o => orderIndexMap[o.id] !== undefined);
   }, [sortedOrders, orderIndexMap]);
+
+  // Unique cup sizes for filter dropdown
+  const uniqueCupSizes = useMemo(() => {
+    const sizes = new Set(orders.map(o => o.cupSize).filter(Boolean));
+    return Array.from(sizes);
+  }, [orders]);
 
   const allocation = useMemo(() => {
     if (!expandedFreezers.length || !filteredOrders.length) return [];
@@ -463,11 +471,11 @@ export default function App() {
   }, [filteredOrders, expandedFreezers]);
 
   const visibleFreezers = useMemo(() => {
-    const isFiltering = tlFilterStatus !== 'Semua' || tlFilterCup !== 'Semua' || tlFilterDriver !== 'Semua';
+    const isFiltering = tlFilterStatus !== 'Semua' || tlFilterCup !== 'Semua' || tlFilterDriver !== 'Semua' || tlFilterSize !== 'Semua';
     if (!isFiltering) return expandedFreezers;
     const activeUnitIds = new Set(allocation.map(a => a.unitId));
     return expandedFreezers.filter(u => activeUnitIds.has(u.id));
-  }, [expandedFreezers, allocation, tlFilterStatus, tlFilterCup, tlFilterDriver]);
+  }, [expandedFreezers, allocation, tlFilterStatus, tlFilterCup, tlFilterDriver, tlFilterSize]);
 
   const reportStats = useMemo(() => {
     const filtered = (orders || []).filter(o => {
@@ -681,6 +689,7 @@ export default function App() {
       mapsLink: order.mapsLink || '',
       productQuantity: order.productQuantity || '',
       cupDesign: order.cupDesign || 'Regular',
+      cupSize: order.cupSize || '', // Populate cupSize
       status: order.status || 'Ready',
       deliveryDriver: order.deliveryDriver || order.assignedDriver || '',
       pickupDriver: order.pickupDriver || ''
@@ -718,6 +727,7 @@ export default function App() {
     setOrderForm({
       customerName: '', phone: '', deliveryDate: '', eventDate: '', returnDate: '', unitCount: 1, 
       freezerType: '', address: '', mapsLink: '', productQuantity: '', cupDesign: 'Regular', 
+      cupSize: '', // Reset cupSize
       status: 'Ready', deliveryDriver: '', pickupDriver: ''
     });
   };
@@ -984,7 +994,8 @@ export default function App() {
       'Jenis Freezer': o.freezerType,
       'Jml Unit': o.unitCount,
       'Produk (Pcs)': o.productQuantity, 
-      'Desain Cup': o.cupDesign
+      'Desain Cup': o.cupDesign,
+      'Ukuran Cup': o.cupSize || '-' // Added cupSize
     })));
     const wb = window.XLSX.utils.book_new(); window.XLSX.utils.book_append_sheet(wb, ws, "Orders");
     window.XLSX.writeFile(wb, `Laporan_Logistik_${reportYear}.xlsx`);
@@ -1080,6 +1091,8 @@ export default function App() {
       </div>
 
       <div className="p-6 md:p-10 relative z-10 text-left">
+        {/* --- VIEW ROUTING (KEMBALI KE CONDITIONAL SEDERHANA UNTUK STABILITAS) --- */}
+        
         {activeTab === 'calendar' && (
           <div className="max-w-[1600px] mx-auto space-y-12 animate-in">
             {/* TOP ACTIONS */}
@@ -1091,22 +1104,41 @@ export default function App() {
                   <select className="bg-white text-xs font-bold pl-4 pr-10 py-2 rounded-xl border border-slate-100 outline-none focus:ring-2 focus:ring-sky-100" value={filterDriverCopy} onChange={(e) => setFilterDriverCopy(e.target.value)}><option value="Semua">Pilih Driver</option>{drivers.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}</select>
                   <button onClick={copyLogisticsText} className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-xs transition-all ${copyFeedback ? 'bg-emerald-500 text-white shadow-lg' : 'bg-slate-700 text-white hover:bg-slate-800 shadow-md'}`}>{copyFeedback ? <CheckCircle2 size={14}/> : <ClipboardList size={14}/>} {copyFeedback ? 'Tersalin!' : 'Salin WhatsApp'}</button>
                 </div>
+                {/* DUA TOMBOL DOWNLOAD */}
                 <div className="flex gap-2">
                    <button onClick={downloadJPG} disabled={isDownloading} className="flex items-center gap-2 bg-white border border-sky-100 text-sky-500 px-5 py-3 rounded-2xl font-bold hover:bg-sky-50 shadow-sm text-xs">{isDownloading ? <span className="animate-spin">◌</span> : <Download size={16}/>} JPG</button>
                    <button onClick={downloadTimelinePDF} disabled={isDownloading} className="flex items-center gap-2 bg-slate-700 border border-slate-700 text-white px-5 py-3 rounded-2xl font-bold hover:bg-slate-800 shadow-sm text-xs">{isDownloading ? <span className="animate-spin">◌</span> : <FileText size={16}/>} PDF Full</button>
                 </div>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 bg-slate-50/50 p-6 rounded-[2rem] border border-slate-100 shadow-inner no-capture">
-                  {['Status', 'Tutup Cup', 'Driver'].map((type, i) => (
+
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-4 bg-slate-50/50 p-6 rounded-[2rem] border border-slate-100 shadow-inner no-capture">
+                  {['Status', 'Tutup Cup', 'Driver', 'Ukuran Cup'].map((type, i) => (
                     <div key={type} className="flex flex-col gap-2 text-left">
                         <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Saring {type}</span>
-                        <select className="pl-3 pr-10 py-3 rounded-xl border-none font-bold text-xs bg-white shadow-sm outline-sky-500 cursor-pointer" value={[tlFilterStatus, tlFilterCup, tlFilterDriver][i]} onChange={e => [setTlFilterStatus, setTlFilterCup, setTlFilterDriver][i](e.target.value)}>
-                        <option value="Semua">Semua {type}</option>
-                        {i === 0 ? STATUS_OPTIONS.map(s => <option key={s.label} value={s.label}>{s.label}</option>) : i === 1 ? ['Regular', 'Custom'].map(c => <option key={c} value={c}>{c}</option>) : drivers.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}
-                      </select>
+                        <select 
+                            className="pl-3 pr-10 py-3 rounded-xl border-none font-bold text-xs bg-white shadow-sm outline-sky-500 cursor-pointer" 
+                            value={[tlFilterStatus, tlFilterCup, tlFilterDriver, tlFilterSize][i]} 
+                            onChange={e => [setTlFilterStatus, setTlFilterCup, setTlFilterDriver, setTlFilterSize][i](e.target.value)}
+                        >
+                            <option value="Semua">Semua {type}</option>
+                            {i === 0 ? STATUS_OPTIONS.map(s => <option key={s.label} value={s.label}>{s.label}</option>) : 
+                             i === 1 ? ['Regular', 'Custom'].map(c => <option key={c} value={c}>{c}</option>) : 
+                             i === 2 ? drivers.map(d => <option key={d.id} value={d.name}>{d.name}</option>) :
+                             uniqueCupSizes.map(s => <option key={s} value={s}>{s}</option>)
+                            }
+                        </select>
                     </div>
                   ))}
-                  <div className="flex flex-col justify-end"><button onClick={() => { setTlFilterStatus('Semua'); setTlFilterCup('Semua'); setTlFilterDriver('Semua'); }} className="p-3 rounded-xl font-black text-[10px] uppercase text-sky-500 bg-white hover:bg-sky-50 transition-all tracking-widest shadow-sm">Reset Filter ↻</button></div>
+                  <div className="flex flex-col justify-end"><button onClick={() => { setTlFilterStatus('Semua'); setTlFilterCup('Semua'); setTlFilterDriver('Semua'); setTlFilterSize('Semua'); }} className="p-3 rounded-xl font-black text-[10px] uppercase text-sky-500 bg-white hover:bg-sky-50 transition-all tracking-widest shadow-sm">Reset Filter ↻</button></div>
+              </div>
+
+              {/* NAVIGASI BULAN (REPOSITIONED BELOW FILTERS) */}
+              <div className="flex items-center justify-between bg-white px-6 py-4 rounded-2xl shadow-sm border border-slate-100 mb-4">
+                  <button onClick={prevMonth} className="p-2 hover:bg-slate-100 rounded-full transition-all text-slate-400 hover:text-slate-700"><ChevronLeft size={24}/></button>
+                  <h3 className="text-lg font-black text-slate-700 uppercase tracking-widest">
+                    {MONTHS_LIST[currentDate.getMonth()]} <span className="text-sky-500">{currentDate.getFullYear()}</span>
+                  </h3>
+                  <button onClick={nextMonth} className="p-2 hover:bg-slate-100 rounded-full transition-all text-slate-400 hover:text-slate-700"><ChevronRight size={24}/></button>
               </div>
             </div>
 
@@ -1161,7 +1193,12 @@ export default function App() {
                             }
                             return (<td key={day} className="border-r border-sky-50/30 p-1.5 h-16 relative" style={{ backgroundColor: !target && (isWeekend || isHoliday) ? '#fff1f2' : undefined }}>
                               {target && (
-                                <div onClick={() => handleOpenEditOrder(target.order)} className="absolute inset-1.5 rounded-xl shadow-lg transition-all duration-300 hover:scale-[1.05] cursor-pointer z-20" style={{ backgroundColor: bBg, opacity: op }}>
+                                <div 
+                                  onClick={() => handleOpenEditOrder(target.order)} 
+                                  className="absolute inset-1.5 rounded-xl shadow-lg transition-all duration-300 hover:scale-[1.05] cursor-pointer z-20" 
+                                  style={{ backgroundColor: bBg, opacity: op }}
+                                  title={`Pelanggan: ${target.order.customerName}\nAlamat: ${target.order.address}`}
+                                >
                                   <div className="absolute inset-0 flex items-center justify-center z-10">
                                     <span className="text-white text-[10px] font-black drop-shadow-md">
                                       {orderIndexMap[target.order.id]}
@@ -1183,6 +1220,7 @@ export default function App() {
                 </div>
               </div>
 
+              {/* LIST VIEW */}
               <div className="bg-white rounded-[2.5rem] shadow-xl border border-white overflow-hidden text-left">
                   <div className="p-8 border-b border-slate-50 bg-slate-50/30 flex justify-between items-center"><h3 className="text-xl font-black text-slate-800 uppercase italic">Database Booking Aktif</h3></div>
                   <div className="overflow-x-auto"><table className="w-full border-collapse">
@@ -1220,6 +1258,7 @@ export default function App() {
                           <div className="flex flex-col gap-1">
                             <span className="bg-sky-50 text-sky-600 px-3 py-1 rounded-lg text-[9px] font-black uppercase w-fit">{o.unitCount}x {o.freezerType}</span>
                             <span className={`text-[9px] font-bold uppercase tracking-widest ${o.cupDesign === 'Custom' ? 'text-indigo-600' : 'text-slate-400'}`}>Cup: {o.cupDesign}</span>
+                            {o.cupSize && <span className="text-[8px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded w-fit">Size: {o.cupSize}</span>}
                           </div>
                         </td>
                         <td className="p-4">
@@ -1249,6 +1288,7 @@ export default function App() {
 
         {activeTab === 'reports' && (
           <div className="max-w-[1400px] mx-auto space-y-12 animate-in text-left">
+            {/* HEADER LAPORAN + CEK STOK BUTTON */}
             <div className="bg-white p-8 rounded-[2.5rem] shadow-xl border border-white flex flex-col md:flex-row items-center justify-between gap-6 no-capture">
               <div>
                 <h2 className="text-2xl font-black text-slate-800 uppercase italic tracking-tighter leading-none mb-1 text-left">Analisa Logistik</h2>
@@ -1272,12 +1312,14 @@ export default function App() {
                  <h3 className="text-lg font-bold text-slate-700 mb-8 italic">Performa Driver</h3>
                  <div className="w-full h-80 relative flex items-center justify-center"><canvas id="driverPerformanceChart"></canvas></div>
               </div>
+              {/* GRAFIK LAPORAN TAHUNAN BARU */}
               <div className="bg-white p-10 rounded-[3rem] shadow-2xl border border-white flex flex-col items-center lg:col-span-2">
                  <h3 className="text-lg font-bold text-slate-700 mb-8 italic">Tren Order Tahunan {reportYear}</h3>
                  <div className="w-full h-80 relative flex items-center justify-center"><canvas id="annualReportChart"></canvas></div>
               </div>
             </div>
 
+            {/* TOMBOL DOWNLOAD DETAIL */}
             <div className="bg-white p-10 rounded-[3rem] shadow-2xl border border-white text-center space-y-8 no-capture">
                <div className="max-w-md mx-auto space-y-4 text-center">
                  <div className="w-20 h-20 bg-sky-50 rounded-3xl flex items-center justify-center mx-auto text-sky-400 shadow-inner text-center"><Download size={40}/></div>
@@ -1428,6 +1470,9 @@ export default function App() {
                  {/* Detail Produk & Desain */}
                  <div className="md:col-span-2"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Jumlah Pcs Produk</label><input type="number" min="0" required className="w-full p-4 rounded-2xl bg-slate-50 border-none mt-2 font-bold shadow-inner" placeholder="0" value={orderForm.productQuantity} onChange={e => setOrderForm({...orderForm, productQuantity: e.target.value})}/></div>
                  <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Tutup Cup</label><select className="w-full p-4 rounded-2xl bg-slate-50 border-none mt-2 font-bold shadow-inner" value={orderForm.cupDesign} onChange={e => setOrderForm({...orderForm, cupDesign: e.target.value})}><option value="Regular">Regular</option><option value="Custom">Custom</option></select></div>
+                 
+                 {/* UKURAN CUP (BARU) */}
+                 <div className="md:col-span-3"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Ukuran Cup</label><input className="w-full p-4 rounded-2xl bg-slate-50 border-none mt-2 font-bold shadow-inner" placeholder="Contoh: 12 Oz / 100 ml" value={orderForm.cupSize} onChange={e => setOrderForm({...orderForm, cupSize: e.target.value})}/></div>
 
                  {/* Pemilihan Freezer */}
                  <div className="md:col-span-2"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Pilih Freezer</label><select required className="w-full p-4 rounded-2xl bg-slate-50 border-none mt-2 font-bold shadow-inner" value={orderForm.freezerType} onChange={e => setOrderForm({...orderForm, freezerType: e.target.value})}><option value="">-- Pilih --</option>{assets.map(a => <option key={a.id} value={a.type}>{a.type} ({a.name})</option>)}</select></div>
