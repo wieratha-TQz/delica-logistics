@@ -116,10 +116,10 @@ const getDayStatus = (date) => {
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const d = String(date.getDate()).padStart(2, '0');
   const dateKey = `${year}-${month}-${d}`;
-  
+   
   const isWeekend = day === 0 || day === 6;
   const holidayName = HOLIDAYS_DATA[dateKey];
-  
+   
   return { isWeekend, isHoliday: !!holidayName, holidayName };
 };
 
@@ -187,7 +187,7 @@ const LoginScreen = ({ onLogin, isLoading, error }) => {
               />
             </div>
           </div>
-          
+           
           <div className="space-y-1">
             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Password</label>
             <div className="relative">
@@ -225,7 +225,7 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [loginError, setLoginError] = useState('');
-  
+   
   const [activeTab, setActiveTab] = useState('dashboard'); 
   const [orders, setOrders] = useState([]);
   const [assets, setAssets] = useState([]);
@@ -255,7 +255,7 @@ export default function App() {
   const [isSaving, setIsSaving] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
-   
+    
   const [scriptsLoaded, setScriptsLoaded] = useState(false);
     
   const [logisticsDate, setLogisticsDate] = useState(new Date().toISOString().split('T')[0]);
@@ -422,19 +422,35 @@ export default function App() {
 
   const orderIndexMap = useMemo(() => {
     const map = {};
+    
+    // Rentang bulan yang dipilih di timeline
+    const monthStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+    monthStart.setHours(0, 0, 0, 0);
+    const monthEnd = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
+    monthEnd.setHours(23, 59, 59, 999);
+
     const filtered = sortedOrders.filter(o => {
       const matchStatus = tlFilterStatus === 'Semua' || o.status === tlFilterStatus;
       const matchCup = tlFilterCup === 'Semua' || o.cupDesign === tlFilterCup;
       const matchDriver = tlFilterDriver === 'Semua' || o.deliveryDriver === tlFilterDriver || o.pickupDriver === tlFilterDriver;
       const matchSize = tlFilterSize === 'Semua' || o.cupSize === tlFilterSize; // Filter logic for size
-      return matchStatus && matchCup && matchDriver && matchSize;
+      
+      // Filter Tanggal (Overlap dengan bulan yang dipilih)
+      const oStart = safeDate(o.deliveryDate || o.eventDate);
+      const oEnd = safeDate(o.returnDate || o.eventDate);
+      oStart.setHours(0, 0, 0, 0);
+      oEnd.setHours(23, 59, 59, 999);
+      
+      const isVisibleInMonth = oStart <= monthEnd && oEnd >= monthStart;
+
+      return matchStatus && matchCup && matchDriver && matchSize && isVisibleInMonth;
     });
     
     filtered.forEach((o, index) => {
       map[o.id] = index + 1;
     });
     return map;
-  }, [sortedOrders, tlFilterStatus, tlFilterCup, tlFilterDriver, tlFilterSize]);
+  }, [sortedOrders, tlFilterStatus, tlFilterCup, tlFilterDriver, tlFilterSize, currentDate]); // Added currentDate
 
   const filteredOrders = useMemo(() => {
     return sortedOrders.filter(o => orderIndexMap[o.id] !== undefined);
@@ -754,23 +770,56 @@ export default function App() {
     const selectedAsset = assets.find(a => a.type === orderForm.freezerType);
     const totalStock = parseInt(selectedAsset?.quantity || 0);
     
-    let usedStock = 0;
-    orders.forEach(o => {
-      if (editingId && o.id === editingId) return;
-      if (o.freezerType === orderForm.freezerType) {
+    // --- START FIX: PEAK DAILY USAGE CALCULATION ---
+    // Logika lama (akumulasi sederhana) diganti dengan pengecekan per hari
+    // untuk menghindari akumulasi order yang tidak tumpang tindih (disjoint sets).
+    
+    // 1. Filter order yang relevan (tipe sama & bukan order yang sedang diedit)
+    const relevantOrders = orders.filter(o => {
+      if (editingId && o.id === editingId) return false;
+      return o.freezerType === orderForm.freezerType;
+    });
+
+    // 2. Loop setiap hari dalam range request untuk cari "Peak Usage"
+    let maxUsageInPeriod = 0;
+    
+    // Clone start date agar tidak merubah reqStart asli
+    const checkDate = new Date(reqStart);
+    
+    // Loop sampai checkDate > reqEnd
+    while (checkDate <= reqEnd) {
+      // Set range hari ini (00:00 - 23:59)
+      const dayStart = new Date(checkDate); dayStart.setHours(0,0,0,0);
+      const dayEnd = new Date(checkDate); dayEnd.setHours(23,59,59,999);
+      
+      let dailyUsage = 0;
+      
+      relevantOrders.forEach(o => {
+        // Parse tanggal order existing
         const oStart = new Date(o.deliveryDate || o.eventDate);
         const oEnd = new Date(o.returnDate || o.eventDate);
         oStart.setHours(0,0,0,0);
         oEnd.setHours(23,59,59,999);
-        if (reqStart <= oEnd && reqEnd >= oStart) {
-          usedStock += parseInt(o.unitCount || 0);
+        
+        // Cek apakah order existing "aktif" di hari ini (dayStart s/d dayEnd)
+        // Logika overlap: (StartA <= EndB) && (EndA >= StartB)
+        if (dayStart <= oEnd && dayEnd >= oStart) {
+           dailyUsage += parseInt(o.unitCount || 0);
         }
+      });
+      
+      if (dailyUsage > maxUsageInPeriod) {
+        maxUsageInPeriod = dailyUsage;
       }
-    });
+      
+      // Lanjut ke hari berikutnya
+      checkDate.setDate(checkDate.getDate() + 1);
+    }
+    // --- END FIX ---
 
     const reqQty = parseInt(orderForm.unitCount || 0);
-    if (usedStock + reqQty > totalStock) {
-      setErrorMessage(`Gagal! Stok ${orderForm.freezerType} penuh pada tanggal tsb. Sisa: ${Math.max(0, totalStock - usedStock)} unit.`);
+    if (maxUsageInPeriod + reqQty > totalStock) {
+      setErrorMessage(`Gagal! Stok ${orderForm.freezerType} penuh pada periode tsb. Terpakai maks: ${maxUsageInPeriod}, Sisa aman: ${Math.max(0, totalStock - maxUsageInPeriod)} unit.`);
       return; 
     }
 
@@ -1106,8 +1155,8 @@ export default function App() {
                 </div>
                 {/* DUA TOMBOL DOWNLOAD */}
                 <div className="flex gap-2">
-                   <button onClick={downloadJPG} disabled={isDownloading} className="flex items-center gap-2 bg-white border border-sky-100 text-sky-500 px-5 py-3 rounded-2xl font-bold hover:bg-sky-50 shadow-sm text-xs">{isDownloading ? <span className="animate-spin">◌</span> : <Download size={16}/>} JPG</button>
-                   <button onClick={downloadTimelinePDF} disabled={isDownloading} className="flex items-center gap-2 bg-slate-700 border border-slate-700 text-white px-5 py-3 rounded-2xl font-bold hover:bg-slate-800 shadow-sm text-xs">{isDownloading ? <span className="animate-spin">◌</span> : <FileText size={16}/>} PDF Full</button>
+                    <button onClick={downloadJPG} disabled={isDownloading} className="flex items-center gap-2 bg-white border border-sky-100 text-sky-500 px-5 py-3 rounded-2xl font-bold hover:bg-sky-50 shadow-sm text-xs">{isDownloading ? <span className="animate-spin">◌</span> : <Download size={16}/>} JPG</button>
+                    <button onClick={downloadTimelinePDF} disabled={isDownloading} className="flex items-center gap-2 bg-slate-700 border border-slate-700 text-white px-5 py-3 rounded-2xl font-bold hover:bg-slate-800 shadow-sm text-xs">{isDownloading ? <span className="animate-spin">◌</span> : <FileText size={16}/>} PDF Full</button>
                 </div>
               </div>
 
